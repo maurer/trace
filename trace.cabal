@@ -1,0 +1,17 @@
+Name:                trace
+Version:             0.1
+License:             AllRightsReserved
+License-file:        LICENSE
+Author:              Matthew Maurer
+Maintainer:          maurer@ugcs.caltech.edu
+Category:            System
+Build-type:          Simple
+Cabal-version:       >=1.2
+
+
+Library
+  Hs-Source-Dirs:      src
+  Exposed-modules:     System.Trace
+  Other-Modules:       System.Trace.Linux, System.Trace.X86_64
+  Build-depends:       base, ptrace, mtl, binary, bytestring
+  Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables
