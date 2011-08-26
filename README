@@ -1,0 +1,2 @@
+This project is intended to provide a platform independent tracing interface.
+For now, it is only bound to the ptrace package, and is being developed in tandem with it, so it has limited functionality and only works under Linux.
