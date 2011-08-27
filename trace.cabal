@@ -12,6 +12,6 @@ Cabal-version:       >=1.2
 Library
   Hs-Source-Dirs:      src
   Exposed-modules:     System.Trace
-  Other-Modules:       System.Trace.Linux, System.Trace.X86_64
+  Other-Modules:       System.Trace.Linux
   Build-depends:       base, ptrace, mtl, binary, bytestring
   Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables

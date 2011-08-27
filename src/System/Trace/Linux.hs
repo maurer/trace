@@ -1,7 +1,6 @@
 module System.Trace.Linux where
 
 import System.PTrace
-import System.Trace.X86_64
 import Control.Monad.Reader
 import Foreign.Storable
 import Foreign.Ptr
@@ -12,6 +11,12 @@ import Data.ByteString.Unsafe
 import Foreign.Marshal.Alloc
 import Foreign.C.Types
 import System.Mem.Weak
+
+
+type Regs = PTRegs
+
+nopRegs :: Regs -> Regs
+nopRegs r = r {orig_rax = 39} --TODO fetch from a header file
 
 assertMsg :: String -> Bool -> Trace ()
 assertMsg _ True  = return ()
@@ -58,7 +63,8 @@ liftPT m = do
 advanceEvent :: Trace Event
 advanceEvent = fmap eventTranslate $ liftPT continue
   where eventTranslate :: StopReason -> Event
-        eventTranslate = undefined
+        eventTranslate SyscallEntry = PreSyscall
+        eventTranslate SyscallExit  = PostSyscall
 
 -- | Detach from the program and let it proceed untraced
 --   This invalidates the trace handle, and any actions after
@@ -68,15 +74,11 @@ detach = liftPT detachPT
 
 -- | Get the register structure. As Regs is arch dependent, be careful.
 getRegs :: Trace Regs
-getRegs = fmap convRegs $ liftPT getRegsPT
-  where convRegs :: PTRegs -> Regs
-        convRegs = undefined
+getRegs = liftPT getRegsPT
 
 -- | Sets the register structure. As Regs is arch dependent, be careful.
 setRegs :: Regs -> Trace ()
-setRegs regs = liftPT $ setRegsPT $ convRegs regs
-  where convRegs :: Regs -> PTRegs
-        convRegs = undefined
+setRegs regs = liftPT $ setRegsPT regs
 
 -- | Takes some event handlers and continues the trace with them.
 --   Exact behavior is still in the air concerning early termination.
@@ -88,7 +90,9 @@ traceWithHandler handler = do
 
 -- | Sets the registers up to make a no-op syscall
 nopSyscall :: Trace ()
-nopSyscall = setRegs nopRegs
+nopSyscall = do
+  r <- getRegs
+  setRegs $ nopRegs r
 
 readByteString :: TracePtr CChar -> Size -> Trace ByteString
 readByteString src size = do
@@ -111,7 +115,6 @@ getData target (TP src) size = liftPT $ getDataPT target src size
 setData :: TracePtr a -> Ptr a -> Size -> Trace Size
 setData (TP target) src size = liftPT $ setDataPT target src size
 
---TODO enforce alignment
 tracePeek :: forall a. (Storable a) => TracePtr a -> Trace a
 tracePeek src = do
   let size = sizeOf (undefined :: a)
