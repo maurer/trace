@@ -1,5 +1,6 @@
 module System.Trace.Linux 
-(Event(..)
+(Regs(..)
+,Event(..)
 ,TraceHandle
 ,TracePtr
 ,tracePlusPtr
