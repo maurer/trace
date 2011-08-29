@@ -2,6 +2,7 @@ module System.Trace.Linux
 (Regs(..)
 ,PTRegs(..)
 ,Event(..)
+,Trace
 ,TraceHandle
 ,TracePtr
 ,tracePlusPtr
