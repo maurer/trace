@@ -1,4 +1,27 @@
-module System.Trace.Linux where
+module System.Trace.Linux 
+(Event(..)
+,TraceHandle
+,TracePtr
+,tracePlusPtr
+,runTrace
+,traceIO
+,traceExec
+,traceEvent
+,advanceEvent
+,detach
+,getRegs
+,setRegs
+,traceWithHandler
+,nopSyscall
+,readByteString
+,writeByteString
+,getData
+,setData
+,tracePeek
+,tracePoke
+,traceReadNullTerm
+,traceWriteNullTerm
+) where
 
 import System.PTrace
 import Control.Monad.Reader
