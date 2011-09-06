@@ -136,7 +136,8 @@ readByteString src size = do
   size' <- getData target src size
   -- assertMsg "tried to read a bytestring from unmapped memory" (size == size')
   debug "ReadBS Exit"
-  liftIO $ unsafePackMallocCString target
+  packed <- liftIO $ packCStringLen (size, target)
+  liftIO $ free target
 
 writeByteString :: ByteString -> TracePtr CChar -> Trace ()
 writeByteString bs target = do
