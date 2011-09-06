@@ -13,5 +13,5 @@ Library
   Hs-Source-Dirs:      src
   Exposed-modules:     System.Trace
   Other-Modules:       System.Trace.Linux
-  Build-depends:       base, ptrace, mtl, binary, bytestring
+  Build-depends:       base, ptrace, mtl, binary, bytestring, unix
   Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables

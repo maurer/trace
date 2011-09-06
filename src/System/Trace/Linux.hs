@@ -4,7 +4,7 @@ module System.Trace.Linux
 ,Event(..)
 ,Trace
 ,TraceHandle
-,TracePtr
+,TracePtr(..)
 ,tracePlusPtr
 ,runTrace
 ,traceIO
@@ -24,8 +24,11 @@ module System.Trace.Linux
 ,tracePoke
 ,traceReadNullTerm
 ,traceWriteNullTerm
+,rawTracePtr
 ) where
 
+import System.Posix.Signals
+import System.Exit
 import System.PTrace
 import Control.Monad.Reader
 import Foreign.Storable
@@ -38,7 +41,7 @@ import Foreign.Marshal.Alloc
 import Foreign.C.Types
 import System.Mem.Weak
 
-
+debug = liftIO . putStrLn
 type Regs = PTRegs
 
 nopRegs :: Regs -> Regs
@@ -51,9 +54,12 @@ assertMsg m False = error m
 newtype TraceHandle = TH PTraceHandle
 
 --TODO make sure Int is the right type for signal and exit
-data Event = PreSyscall | PostSyscall | Signal Int | Exit Int
+data Event = PreSyscall | PostSyscall | Signal Signal | Exit ExitCode
 
 newtype TracePtr a = TP (PTracePtr a)
+
+rawTracePtr :: Ptr a -> TracePtr a
+rawTracePtr = TP . PTP
 
 tracePlusPtr :: TracePtr a -> Int -> TracePtr a
 tracePlusPtr (TP ptp) n = TP $ pTracePlusPtr ptp n
@@ -91,6 +97,7 @@ advanceEvent = fmap eventTranslate $ liftPT continue
   where eventTranslate :: StopReason -> Event
         eventTranslate SyscallEntry = PreSyscall
         eventTranslate SyscallExit  = PostSyscall
+        eventTranslate (ProgExit c) = Exit c
 
 -- | Detach from the program and let it proceed untraced
 --   This invalidates the trace handle, and any actions after
@@ -112,7 +119,9 @@ traceWithHandler :: (Event -> Trace ()) -> Trace ()
 traceWithHandler handler = do
   event <- advanceEvent
   handler event
-  traceWithHandler handler
+  case event of
+    Exit _ -> return ()
+    _        -> traceWithHandler handler
 
 -- | Sets the registers up to make a no-op syscall
 nopSyscall :: Trace ()
@@ -122,9 +131,11 @@ nopSyscall = do
 
 readByteString :: TracePtr CChar -> Size -> Trace ByteString
 readByteString src size = do
+  debug "ReadBS Enter"
   target <- liftIO $ mallocBytes size
   size' <- getData target src size
-  assertMsg "tried to read a bytestring from unmapped memory" (size == size')
+  -- assertMsg "tried to read a bytestring from unmapped memory" (size == size')
+  debug "ReadBS Exit"
   liftIO $ unsafePackMallocCString target
 
 writeByteString :: ByteString -> TracePtr CChar -> Trace ()
@@ -160,20 +171,18 @@ tracePoke target v = do
     runTrace th $ do size' <- setData target src size
                      assertMsg "poked at unmapped memory" (size == size')
 
-traceReadNullTerm :: TracePtr CChar -> Trace ByteString
-traceReadNullTerm raw = do
+traceReadNullTerm :: TracePtr CChar -> Size -> Trace ByteString
+traceReadNullTerm raw sz = do
   th <- ask
-  liftIO $ allocaBytes bufSize $ \buf -> runTrace th $ do
-    size <- getData buf raw bufSize
+  debug "traceReadNullTerm"
+  liftIO $ allocaBytes sz $ \buf -> runTrace th $ do
+    size <- getData buf raw sz
     assertMsg "reached unmapped memory while looking for a zero" (size /= 0)
     term <- liftIO $ fmap or $ mapBuf (== 0) (buf, size)
     if term
       then liftIO $ BS.packCString buf
-      else do bs  <- liftIO $ BS.packCStringLen (buf, size)
-              bs' <- traceReadNullTerm $ raw `tracePlusPtr` size
-              return $ BS.append bs bs'
-  where bufSize = 4096
-        mapBuf :: (CChar -> a) -> (Ptr CChar, Int) -> IO [a]
+      else liftIO $ BS.packCStringLen (buf, size - 1)
+  where mapBuf :: (CChar -> a) -> (Ptr CChar, Int) -> IO [a]
         mapBuf f (buf, size) = liftIO $
           mapM (\i -> fmap f $ peek (buf `plusPtr` i)) [0..size - 1]
 
