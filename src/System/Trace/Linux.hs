@@ -5,6 +5,7 @@ module System.Trace.Linux
 ,Trace
 ,TraceHandle
 ,TracePtr(..)
+,setBreak
 ,tracePlusPtr
 ,runTrace
 ,traceIO
@@ -40,8 +41,10 @@ import Data.ByteString.Unsafe
 import Foreign.Marshal.Alloc
 import Foreign.C.Types
 import System.Mem.Weak
+import qualified Data.Map as Map
+import Control.Concurrent.MVar
 
-debug = liftIO . putStrLn
+debug = \_ -> return () --liftIO . putStrLn
 type Regs = PTRegs
 
 nopRegs :: Regs -> Regs
@@ -51,10 +54,13 @@ assertMsg :: String -> Bool -> Trace ()
 assertMsg _ True  = return ()
 assertMsg m False = error m
 
-newtype TraceHandle = TH PTraceHandle
+data TraceHandle = TH {pth :: PTraceHandle, breaks :: MVar (Map.Map WordPtr Word8)}
+
+tTakeMVar x = liftIO $ takeMVar x
+tPutMVar x y = liftIO $ putMVar x y
 
 --TODO make sure Int is the right type for signal and exit
-data Event = PreSyscall | PostSyscall | Signal Signal | Exit ExitCode
+data Event = PreSyscall | PostSyscall | Signal Signal | Exit ExitCode | Breakpoint deriving (Show, Eq)
 
 newtype TracePtr a = TP (PTracePtr a)
 
@@ -67,16 +73,30 @@ tracePlusPtr (TP ptp) n = TP $ pTracePlusPtr ptp n
 type Trace a = ReaderT TraceHandle IO a
 type Size = Int -- Used by sizeOf, so probably OK
 runTrace :: TraceHandle -> Trace a -> IO a
-runTrace h m = runReaderT m h
+runTrace h m = do
+  runReaderT m h
+
+setBreak :: TracePtr Word8 -> Trace ()
+setBreak tp@(TP (PTP p))= do
+  mbreaks <- fmap breaks ask
+  bdb <- tTakeMVar mbreaks
+  orig <- tracePeek tp
+  tracePoke tp $ 0xcc
+  tPutMVar mbreaks (Map.insert (ptrToWordPtr p) orig bdb)
 
 -- | Trace an IO action
 traceIO :: IO ()
         -> IO TraceHandle
-traceIO = (fmap TH) . forkPT
+traceIO m = do
+  -- TODO refactor this to have a THbuilder
+  mv <- newMVar Map.empty
+  (fmap (\x -> TH x mv)) $ forkPT m
 
 -- | Trace an application
 traceExec :: FilePath -> [String] -> IO TraceHandle
-traceExec file args = fmap TH $ execPT file False args Nothing
+traceExec file args = do
+  mv <- newMVar Map.empty
+  fmap (\x -> TH x mv) $ execPT file False args Nothing
 
 -- | Continue execution until an event from the list is hit
 traceEvent :: (Event -> Bool) -> Trace ()
@@ -89,15 +109,34 @@ traceEvent predicate = do
 -- Internal, don't export
 liftPT :: PTrace a -> Trace a
 liftPT m = do
-  TH pth <- ask
-  liftIO $ runPTrace pth m
+  pt <- fmap pth ask
+  liftIO $ runPTrace pt m
 
 advanceEvent :: Trace Event
-advanceEvent = fmap eventTranslate $ liftPT continue
+advanceEvent = do
+  ev <- fmap eventTranslate $ liftPT continue
+  case ev of
+    Breakpoint -> do
+      mbreaks <- fmap breaks ask
+      bdb <- tTakeMVar mbreaks
+      r <- getRegs
+      let pc = (rip r) - 1
+      let pcp = fromIntegral pc
+      liftIO $ print pc
+      liftIO $ print bdb
+      tracePoke (rawTracePtr $ wordPtrToPtr $ pcp) (bdb Map.! pcp)
+      r <- getRegs
+      setRegs $ r {rip = pc}
+      tPutMVar mbreaks bdb
+      -- TODO do we want behavior like a normal debugger where we put the breakpoint back later?
+    _ -> return ()
+  return ev
   where eventTranslate :: StopReason -> Event
         eventTranslate SyscallEntry = PreSyscall
         eventTranslate SyscallExit  = PostSyscall
         eventTranslate (ProgExit c) = Exit c
+        eventTranslate (Sig 5)      = Breakpoint
+        eventTranslate (Sig n)      = Signal n
 
 -- | Detach from the program and let it proceed untraced
 --   This invalidates the trace handle, and any actions after
@@ -136,8 +175,9 @@ readByteString src size = do
   size' <- getData target src size
   -- assertMsg "tried to read a bytestring from unmapped memory" (size == size')
   debug "ReadBS Exit"
-  packed <- liftIO $ packCStringLen (size, target)
+  packed <- liftIO $ BS.packCStringLen (target, size)
   liftIO $ free target
+  return packed
 
 writeByteString :: ByteString -> TracePtr CChar -> Trace ()
 writeByteString bs target = do
