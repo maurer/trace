@@ -122,8 +122,6 @@ advanceEvent = do
       r <- getRegs
       let pc = (rip r) - 1
       let pcp = fromIntegral pc
-      liftIO $ print pc
-      liftIO $ print bdb
       tracePoke (rawTracePtr $ wordPtrToPtr $ pcp) (bdb Map.! pcp)
       r <- getRegs
       setRegs $ r {rip = pc}
