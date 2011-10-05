@@ -110,7 +110,9 @@ traceEvent predicate = do
 liftPT :: PTrace a -> Trace a
 liftPT m = do
   pt <- fmap pth ask
-  liftIO $ runPTrace pt m
+--TODO handle error nicely
+  Right r <- liftIO $ runPTrace pt m
+  return r
 
 advanceEvent :: Trace Event
 advanceEvent = do
@@ -180,23 +182,20 @@ readByteString src size = do
 writeByteString :: ByteString -> TracePtr CChar -> Trace ()
 writeByteString bs target = do
   th <- ask
-  liftIO $ unsafeUseAsCString bs $ \cs -> runTrace th $ do
-    size <- setData target cs (BS.length bs)
-    assertMsg "tried to write a bytestring on unmapped memory" $
-      size == (BS.length bs)
+  liftIO $ unsafeUseAsCString bs $ \cs -> runTrace th $
+    setData target cs (BS.length bs)
 
 getData :: Ptr a -> TracePtr a -> Size -> Trace Size
 getData target (TP src) size = liftPT $ getDataPT target src size
 
-setData :: TracePtr a -> Ptr a -> Size -> Trace Size
+setData :: TracePtr a -> Ptr a -> Size -> Trace ()
 setData (TP target) src size = liftPT $ setDataPT target src size
 
 tracePeek :: forall a. (Storable a) => TracePtr a -> Trace a
 tracePeek src = do
   let size = sizeOf (undefined :: a)
   target <- liftIO $ mallocBytes size
-  size' <- getData target src size
-  assertMsg "peeked at unmapped memory" (size == size')
+  getData target src size
   res <- liftIO $ peek target
   liftIO $ addFinalizer res (free target)
   return res
@@ -207,8 +206,7 @@ tracePoke target v = do
   th <- ask
   liftIO $ allocaBytes size $ \src -> do
     poke src v
-    runTrace th $ do size' <- setData target src size
-                     assertMsg "poked at unmapped memory" (size == size')
+    runTrace th $ setData target src size
 
 traceReadNullTerm :: TracePtr CChar -> Size -> Trace ByteString
 traceReadNullTerm raw sz = do
@@ -216,7 +214,6 @@ traceReadNullTerm raw sz = do
   debug "traceReadNullTerm"
   liftIO $ allocaBytes sz $ \buf -> runTrace th $ do
     size <- getData buf raw sz
-    assertMsg "reached unmapped memory while looking for a zero" (size /= 0)
     term <- liftIO $ fmap or $ mapBuf (== 0) (buf, size)
     if term
       then liftIO $ BS.packCString buf
