@@ -14,4 +14,5 @@ Library
   Exposed-modules:     System.Trace
   Other-Modules:       System.Trace.Linux
   Build-depends:       base, ptrace, mtl, binary, bytestring, unix, containers
-  Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables
+  Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables,
+                       TypeSynonymInstances
