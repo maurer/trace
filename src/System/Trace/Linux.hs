@@ -28,6 +28,9 @@ module System.Trace.Linux
 ,PPid(..)
 ,TPid(..)
 ,contextSwitch
+,stepCurrent
+,sleep
+,wakeUp
 ) where
 
 import System.Posix.Signals
@@ -61,7 +64,7 @@ assertMsg :: String -> Bool -> Trace ()
 assertMsg _ True  = return ()
 assertMsg m False = error m
 
-data ThreadHandle = T {th :: PTraceHandle, breaks :: IORef (Map.Map WordPtr Word8), sysState :: IORef Bool}
+data ThreadHandle = T {th :: PTraceHandle, breaks :: IORef (Map.Map WordPtr Word8), sysState :: IORef Bool, awake :: IORef Bool}
 
 data TraceHandle = TH {cur :: IORef ThreadHandle, thThreads :: IORef (Map.Map PPid ThreadHandle)}
 
@@ -102,7 +105,8 @@ buildT :: PTraceHandle -> Bool -> IO ThreadHandle
 buildT pth z = do
   f <- newIORef z
   b <- newIORef $ Map.empty
-  return $ T pth b f
+  c <- newIORef True
+  return $ T pth b f c
 
 buildTH :: PTraceHandle -> IO TraceHandle
 buildTH pth = do
@@ -131,7 +135,27 @@ traceEvent predicate = do
     else traceEvent predicate
 
 stepCurrent :: Trace ()
-stepCurrent = liftPT advance
+stepCurrent = do
+  z <- fmap awake currentHandle
+  z' <- liftIO $ readIORef z
+  if z'
+    then liftPT advance
+    else return ()
+
+sleep :: Trace ()
+sleep = do
+  z <- fmap awake currentHandle
+  liftIO $ writeIORef z False
+--TODO make this less "special"
+wakeUp :: TPid -> Trace ()
+wakeUp tpid = do
+  th <- ask
+  z <- fmap (awake . (Map.! tpid)) $ readI $ thThreads th
+  z' <- readI z
+  if z'
+     then return ()
+     else do contextSwitch tpid
+             liftIO $ writeIORef z True
 
 -- Internal, don't export
 liftPT :: PTrace a -> Trace a
@@ -219,6 +243,7 @@ traceWithHandler handler = do
                    [] -> return ()
                    (pid', _) : _ -> do contextSwitch pid'
                                        writeI (thThreads n) (Map.delete pid m)
+                                       traceWithHandler handler
     _      -> traceWithHandler handler
 
 -- | Sets the registers up to make a no-op syscall
