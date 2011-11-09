@@ -64,9 +64,9 @@ assertMsg :: String -> Bool -> Trace ()
 assertMsg _ True  = return ()
 assertMsg m False = error m
 
-data ThreadHandle = T {th :: PTraceHandle, breaks :: IORef (Map.Map WordPtr Word8), sysState :: IORef Bool, awake :: IORef Bool}
+data ThreadHandle = T {th :: PTraceHandle, breaks :: IORef (Map.Map WordPtr Word8), sysState :: IORef Bool, awake :: IORef Bool, running :: IORef Bool}
 
-data TraceHandle = TH {cur :: IORef ThreadHandle, thThreads :: IORef (Map.Map PPid ThreadHandle)}
+data TraceHandle = TH {cur :: IORef PPid, thThreads :: IORef (Map.Map PPid ThreadHandle), delay :: IORef [(PPid, StopReason)]}
 
 writeI x y = liftIO $ writeIORef x y
 readI x = liftIO $ readIORef x
@@ -74,7 +74,13 @@ readI x = liftIO $ readIORef x
 currentHandle :: Trace ThreadHandle
 currentHandle = do
    l <- ask
-   readI (cur l)
+   p <- readI (cur l)
+   pidHandle p
+
+pidHandle :: PPid -> Trace ThreadHandle
+pidHandle p = do
+  d <- fmap thThreads ask
+  fmap (Map.! p) $ readI d
 
 --TODO make sure Int is the right type for signal and exit
 data Event = PreSyscall | PostSyscall | Signal Signal | Exit ExitCode | Breakpoint | Split TPid deriving (Eq, Show)
@@ -106,14 +112,16 @@ buildT pth z = do
   f <- newIORef z
   b <- newIORef $ Map.empty
   c <- newIORef True
-  return $ T pth b f c
+  r <- newIORef False
+  return $ T pth b f c r
 
 buildTH :: PTraceHandle -> IO TraceHandle
 buildTH pth = do
   cur0 <- buildT pth False
-  cur <- newIORef cur0
+  cur <- newIORef (getPPid pth)
   ts  <- newIORef $ Map.fromList [(getPPid pth, cur0)]
-  return $ TH cur ts
+  d   <- newIORef []
+  return $ TH cur ts d
 
 -- | Trace an IO action
 traceIO :: IO ()
@@ -136,10 +144,15 @@ traceEvent predicate = do
 
 stepCurrent :: Trace ()
 stepCurrent = do
+  liftIO $ putStrLn "stepCurrent invoked"
   z <- fmap awake currentHandle
   z' <- liftIO $ readIORef z
-  if z'
-    then liftPT advance
+  y <- fmap running currentHandle
+  y' <- liftIO $ readIORef y
+  liftIO $ print y'
+  if z' && (not y')
+    then do writeI y True
+            liftPT advance
     else return ()
 
 sleep :: Trace ()
@@ -157,6 +170,12 @@ wakeUp tpid = do
      else do contextSwitch tpid
              liftIO $ writeIORef z True
 
+notRunning tpid = do
+  th <- ask
+  z <- fmap (running . (Map.! tpid)) $ readI $ thThreads th
+  liftIO $ putStrLn $ (show tpid) ++ " is now paused."
+  writeI z False
+
 -- Internal, don't export
 liftPT :: PTrace a -> Trace a
 liftPT m = do
@@ -167,10 +186,27 @@ liftPT m = do
     Left e -> error (show e)
     Right r -> return r
 
+bufNextEvent = do
+  d <- fmap delay ask
+  xs <- readI d
+  (pid, ev0) <- case xs of
+                  x : xs' -> do writeI d xs'
+                                return x
+                  [] -> liftIO nextEvent
+  t <- fmap thThreads ask
+  t' <- readI t
+  case Map.lookup pid t' of
+    Just _  -> return (pid, ev0)
+    Nothing -> do z <- bufNextEvent
+                  xs' <- readI d
+                  writeI d ((pid, ev0) : xs')
+                  return z
+
 procEvent :: Trace (TPid, Event)
 procEvent = do
-  (pid, ev0) <- liftIO nextEvent
+  (pid, ev0) <- bufNextEvent
   contextSwitch pid
+  notRunning pid
   ev <- eventTranslate ev0
   liftIO $ print (pid, ev)
   case ev of
@@ -191,8 +227,7 @@ procEvent = do
 contextSwitch :: TPid -> Trace ()
 contextSwitch pid@(P p) = do
   th <- ask
-  cur' <- fmap (Map.! pid) $ readI $ thThreads th
-  writeI (cur th) cur'
+  writeI (cur th) pid
   liftIO $ putStrLn $ "Context switched to: " ++ (show p)
 
 eventTranslate :: StopReason -> Trace Event
