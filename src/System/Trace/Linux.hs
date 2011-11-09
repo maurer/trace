@@ -144,12 +144,10 @@ traceEvent predicate = do
 
 stepCurrent :: Trace ()
 stepCurrent = do
-  liftIO $ putStrLn "stepCurrent invoked"
   z <- fmap awake currentHandle
   z' <- liftIO $ readIORef z
   y <- fmap running currentHandle
   y' <- liftIO $ readIORef y
-  liftIO $ print y'
   if z' && (not y')
     then do writeI y True
             liftPT advance
@@ -173,7 +171,6 @@ wakeUp tpid = do
 notRunning tpid = do
   th <- ask
   z <- fmap (running . (Map.! tpid)) $ readI $ thThreads th
-  liftIO $ putStrLn $ (show tpid) ++ " is now paused."
   writeI z False
 
 -- Internal, don't export
@@ -208,7 +205,6 @@ procEvent = do
   contextSwitch pid
   notRunning pid
   ev <- eventTranslate ev0
-  liftIO $ print (pid, ev)
   case ev of
     Breakpoint -> do
       mbreaks <- fmap breaks currentHandle
@@ -228,7 +224,6 @@ contextSwitch :: TPid -> Trace ()
 contextSwitch pid@(P p) = do
   th <- ask
   writeI (cur th) pid
-  liftIO $ putStrLn $ "Context switched to: " ++ (show p)
 
 eventTranslate :: StopReason -> Trace Event
 eventTranslate SyscallState = do
