@@ -13,6 +13,6 @@ Library
   Hs-Source-Dirs:      src
   Exposed-modules:     System.Trace
   Other-Modules:       System.Trace.Linux
-  Build-depends:       base, ptrace, mtl, binary, bytestring, unix, containers
+  Build-depends:       base, ptrace > 0.1, mtl, binary, unix, bytestring, containers
   Extensions:          GeneralizedNewtypeDeriving, ScopedTypeVariables,
                        TypeSynonymInstances

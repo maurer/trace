@@ -185,11 +185,13 @@ liftPT m = do
 
 bufNextEvent = do
   d <- fmap delay ask
+  p <- fmap cur ask
+  p' <- readI p
   xs <- readI d
   (pid, ev0) <- case xs of
                   x : xs' -> do writeI d xs'
                                 return x
-                  [] -> liftIO nextEvent
+                  [] -> liftIO $ nextEvent p'
   t <- fmap thThreads ask
   t' <- readI t
   case Map.lookup pid t' of
@@ -235,6 +237,7 @@ eventTranslate SyscallState = do
     else return PreSyscall
 eventTranslate (ProgExit c) = return $ Exit c
 eventTranslate (Sig 5)      = return $ Breakpoint
+eventTranslate (Sig 11)     = return $ error "SIGSEGV"
 eventTranslate (Sig n)      = return $ Signal n
 eventTranslate (Forked pt)  = do
   n <- ask
