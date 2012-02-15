@@ -31,6 +31,8 @@ module System.Trace.Linux
 ,stepCurrent
 ,sleep
 ,wakeUp
+,Core
+,core
 ) where
 
 import System.Posix.Signals
@@ -48,6 +50,7 @@ import Foreign.C.Types
 import System.Mem.Weak
 import qualified Data.Map as Map
 import Data.IORef
+import qualified Data.Traversable as T
 
 type TPid = PPid
 
@@ -70,6 +73,17 @@ data TraceHandle = TH {cur :: IORef PPid, thThreads :: IORef (Map.Map PPid Threa
 
 writeI x y = liftIO $ writeIORef x y
 readI x = liftIO $ readIORef x
+
+type Core = Map.Map WordPtr ByteString
+
+core :: Trace Core
+core = do
+  m <- liftPT getMemMap
+  T.traverse getRegion m
+
+getRegion :: MemRegion -> Trace ByteString
+getRegion mr = let sz = mrEnd mr - mrStart mr in
+  readByteString (rawTracePtr $ wordPtrToPtr $ mrStart mr) (fromIntegral sz)
 
 currentHandle :: Trace ThreadHandle
 currentHandle = do
