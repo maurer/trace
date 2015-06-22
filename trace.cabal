@@ -1,7 +1,6 @@
 Name:                trace
 Version:             0.1
-License:             AllRightsReserved
-License-file:        LICENSE
+License:             MIT
 Author:              Matthew Maurer
 Maintainer:          maurer@ugcs.caltech.edu
 Category:            System
